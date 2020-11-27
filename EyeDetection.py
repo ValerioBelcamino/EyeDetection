@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import cv2
 import time
-
+from pygame import mixer
 
 def handle_close(event, cap):
     cap.release()
@@ -121,10 +121,18 @@ def printTextOnImage(img, text):
 
 
 def main():
+    # PROVA MUSICA
+
+    mixer.init()
+    mixer.music.load("siren.wav")
+    # mixer.music.play()
 
     # CASCADE CLASSIFIER CREATION
 
-    closed = False
+    alreadyDoneClose = False
+    alreadyDoneOpen = False
+
+    isPlaying = False
     right_eye_cascade = cv2.CascadeClassifier('haarcascade_righteye_2splits.xml')
     left_eye_cascade = cv2.CascadeClassifier('haarcascade_lefteye_2splits.xml')
     face_cascade = cv2.CascadeClassifier('haarcascade_face.xml')
@@ -144,7 +152,8 @@ def main():
     fig.canvas.mpl_connect("close_event", lambda event: handle_close(event, cap))
     img = None
     found = False
-
+    timerCLosed = 0
+    timerOpened = 0
     # MAIN CYCLE
 
     while cap.isOpened():
@@ -156,16 +165,25 @@ def main():
 
         colorImg = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
+        # GET FACE ROI FROM IMAGE
+
         roi_face = cutROI(gray, face_cascade)
+
+        roi_grayR, roi_grayL = None, None
+
+        # IF A FACE IS FOUND TRY TO GET THE EYES
+
         if roi_face is not None:
+
             roi_faceR = roi_face[:, : roi_face.shape[0] // 2]
+
             roi_faceL = roi_face[:, roi_face.shape[0] // 2 :]
 
             roi_grayR = cutROI(roi_faceR, right_eye_cascade)
 
             roi_grayL = cutROI(roi_faceL, left_eye_cascade)
 
-
+        # IF ONE OF THE EYES IS NOT FOUND WE PRINT ON THE CAM AN ERROR MSG
 
         if roi_grayL is not None and roi_grayR is not None:
 
@@ -173,18 +191,55 @@ def main():
 
             newimgR = transformsR(roi_grayR)
 
+            checkL = checkContours(newimgL)
+            checkR = checkContours(newimgR)
 
-            if checkContours(newimgL) and checkContours(newimgR) and not closed:
-                closed = True
-                timer = time.time()
-                print(closed, timer)
-            elif closed:
-                if time.time() - timer > 3:
-                    print("occhio chiusoooooo")
-                    closed = False
+            if checkL or checkR and not alreadyDoneClose:
+                alreadyDoneClose = True
+                timerCLosed = time.time()
+                alreadyDoneOpen = False
+                # print("alreadyDoneClose: ", alreadyDoneClose, "timer Close: ", timerCLosed)
+
+            if checkL or checkR and alreadyDoneClose:
+                # print(time.time() - timerCLosed)
+                if time.time() - timerCLosed > 0.15:
+                    if not isPlaying:
+                        print("parte il suono")
+                        mixer.music.play(100)
+                        isPlaying = True
+                        # print("occhio chiusoooooo")
+                    alreadyDoneClose = False
+
+
+            if not checkL and not checkR and not alreadyDoneOpen:
+                timerOpened = time.time()
+                alreadyDoneOpen = True
+                # print("alreadyDoneOpen: ", alreadyDoneOpen, "timer Open: ", timerOpened)
+
+            if not checkL and not checkR and alreadyDoneOpen:
+                if time.time() - timerOpened > 0.5 and isPlaying:
+
+                    # print("alreadyDoneOpen", "elapsed time: ", time.time() - timerOpened)
+                    if isPlaying:
+                        mixer.music.stop()
+                        mixer.music.rewind()
+                        isPlaying = False
+                        print("fermo il suono")
+                    alreadyDoneOpen = False
+
+                elif not isPlaying:
+                    # print("reset alreadyOpenClose")
+                    alreadyDoneClose = False
+
+
+            # print(alreadyDoneClose)
+
+
         else:
             print("non trovato")
             printTextOnImage(colorImg, "Eye not found!")
+
+        # DISPLAY THE IMAGE
 
         if img is None:
 
@@ -192,7 +247,7 @@ def main():
             # get axis extent
             extent = ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
 
-            img = plt.imshow(newimgR, aspect='equal')
+            img = plt.imshow(colorImg, aspect='equal')
             plt.axis("off")  # hide axis, ticks, ...
             #plt.title("Camera Capture")
             # show the plot!
@@ -200,7 +255,7 @@ def main():
 
         else:
             # set the current frame as the data to show
-            img.set_data(newimgR)
+            img.set_data(colorImg)
             # update the figure associated to the shown plot
             fig.canvas.draw()
             fig.canvas.flush_events()
